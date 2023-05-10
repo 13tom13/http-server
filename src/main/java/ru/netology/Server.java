@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 
 public class Server {
@@ -20,9 +21,26 @@ public class Server {
 
     private final ExecutorService executor;
 
+    private final ConcurrentHashMap <String, ConcurrentHashMap<String, Handler>> handlers = new ConcurrentHashMap<>();
+
     public Server(int port,ExecutorService executor) {
         this.port = port;
         this.executor = executor;
+    }
+
+    public void addHandler(String method, String path, Handler handler) {
+
+    }
+
+    public void start() {
+        System.out.println("server start...");
+        try (final var serverSocket = new ServerSocket(port)) {
+            while (true) {
+                connection(serverSocket.accept());
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     private void connection(Socket socket) {
@@ -93,14 +111,4 @@ public class Server {
         executor.submit(thread);
     }
 
-    public void start() {
-        System.out.println("server start...");
-        try (final var serverSocket = new ServerSocket(port)) {
-            while (true) {
-                connection(serverSocket.accept());
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
 }
