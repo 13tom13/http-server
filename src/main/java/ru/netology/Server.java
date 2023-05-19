@@ -1,13 +1,16 @@
 package ru.netology;
 
-import org.apache.hc.client5.http.classic.HttpClient;
 
-import java.io.*;
+import org.apache.commons.fileupload.FileItem;
+
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.Array;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
@@ -29,10 +32,13 @@ public class Server {
 
     private static final int DEFAULT_THREADPOOL_SIZE = 64;
 
+    private static final int LIMIT = 4096;
+
     private static final String DEFAULT_PATH = "public";
 
     public static final String GET = "GET";
     public static final String POST = "POST";
+
 
     public Server(int threadPoolSize, String defaultPath) {
         this.threadPool = Executors.newFixedThreadPool(threadPoolSize);
@@ -50,18 +56,16 @@ public class Server {
         this(DEFAULT_THREADPOOL_SIZE, DEFAULT_PATH);
     }
 
+
     private void connection(Socket socket) {
         final var allowedMethods = List.of(GET, POST);
         try (
                 final var in = new BufferedInputStream(socket.getInputStream());
                 final var out = new BufferedOutputStream(socket.getOutputStream())
         ) {
-            Request request = new Request();
-            // лимит на request line + заголовки
-            final var limit = 4096;
-
-            in.mark(limit);
-            final var buffer = new byte[limit];
+            Request request = new Request(in);
+            in.mark(LIMIT);
+            final var buffer = new byte[LIMIT];
             final var read = in.read(buffer);
 
             // ищем request line
@@ -127,6 +131,7 @@ public class Server {
             // пропускаем requestLine
             in.skip(headersStart);
 
+
             final var headersBytes = in.readNBytes(headersEnd - headersStart);
             request.setHeaders(Arrays.asList(new String(headersBytes).split("\r\n")));
             System.out.println("headers: " + request.getHeaders());
@@ -136,18 +141,41 @@ public class Server {
                 in.skip(headersDelimiter.length);
                 // вычитываем Content-Length, чтобы прочитать body
                 final var contentLength = extractHeader(request.getHeaders(), "Content-Length");
+                request.setContentType(extractHeader(request.getHeaders(), "Content-Type").get());
+                System.out.println("Content-Type: " + request.getContentType());
                 if (contentLength.isPresent()) {
-                    final var length = Integer.parseInt(contentLength.get());
-                    final var bodyBytes = in.readNBytes(length);
-                    request.setBody(new String(bodyBytes));
-                    System.out.println("body: " + request.getBody());
+                    request.setContentLength(Integer.parseInt(contentLength.get()));
+                    if (!request.getContentType().startsWith("multipart/")) {
+                        final var bodyBytes = in.readNBytes(request.getContentLength());
+                        request.setBody(new String(bodyBytes));
+                        System.out.println("body: " + request.getBody());
+//                        // парсинг тела запроса
+//                        for (final var s : request.getPostParams()) {
+//                            System.out.println("param: " + s.getValue());
+//                        }
+                        // парсинг определенного поля из тела запроса
+                        System.out.println("param with name test: " + request.getPostParam("test"));
+                    } else {
+                        // парсинг запроса с content-Type multipart/form-data
+                        for (FileItem item : request.getParts()) {
+                            if (item.getName() != null) {
+                                System.out.println("part is file, " + "name: " + item.getName());
+                            } else {
+                                System.out.println("part fieldName: " + item.getFieldName() + " value: " + item.getString());
+                            }
+                        }
+                        //парсинг определенного поля запроса с content-Type multipart/form-data
+//                        System.out.println("content part with name \"title\": " + request.getPart("title").getString());
+
+                    }
                 }
             }
 
-            if (searchHandler(request.getMethod(), request.getPath())){
+
+            if (searchHandler(request.getMethod(), request.getPath())) {
                 System.out.println("handler found");
-                getHandler(request.getMethod(), request.getPath()).handle(request,out);
-            }else {
+                getHandler(request.getMethod(), request.getPath()).handle(request, out);
+            } else {
                 out.write((
                         "HTTP/1.1 200 OK\r\n" +
                                 "Content-Length: 0\r\n" +
@@ -188,6 +216,7 @@ public class Server {
     private Handler getHandler(String method, String path) {
         return handlers.get(method).get(path);
     }
+
 
     private void badRequest(BufferedOutputStream out) throws IOException {
         out.write((
@@ -278,5 +307,6 @@ public class Server {
     public void start() {
         this.start(DEFAULT_PORT);
     }
+
 
 }
