@@ -1,18 +1,20 @@
 package ru.netology;
 
-import org.apache.hc.client5.http.classic.HttpClient;
 
-import java.io.*;
+import org.apache.hc.core5.http.NameValuePair;
+import org.apache.hc.core5.net.URLEncodedUtils;
+
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.Array;
 import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -29,10 +31,13 @@ public class Server {
 
     private static final int DEFAULT_THREADPOOL_SIZE = 64;
 
+    private static final int LIMIT = 4096;
+
     private static final String DEFAULT_PATH = "public";
 
     public static final String GET = "GET";
     public static final String POST = "POST";
+
 
     public Server(int threadPoolSize, String defaultPath) {
         this.threadPool = Executors.newFixedThreadPool(threadPoolSize);
@@ -50,6 +55,63 @@ public class Server {
         this(DEFAULT_THREADPOOL_SIZE, DEFAULT_PATH);
     }
 
+    public List<NameValuePair> getQueryParams(Request request) {
+        return URLEncodedUtils.parse(request.getQuery(), StandardCharsets.UTF_8);
+    }
+
+    public List<String> getQueryParam(String name, Request request) {
+        final var params = getQueryParams(request);
+        List<String> paramValue = new ArrayList<>();
+        for (final var param : params) {
+            if (param.getName().equals(name)) paramValue.add(param.getValue());
+        }
+        return paramValue;
+    }
+
+    public List<NameValuePair> getPostParams(Request request) {
+        return URLEncodedUtils.parse(request.getBody(), StandardCharsets.UTF_8);
+    }
+
+    public List<String> getPostParam(String name, Request request) {
+        final var params = getPostParams(request);
+        List<String> paramValue = new ArrayList<>();
+        for (final var param : params) {
+            if (param.getName().equals(name)) paramValue.add(param.getValue());
+        }
+        return paramValue;
+    }
+
+
+//    public void testForMulti(Request request) throws FileUploadException {
+//        System.out.println("testForMulti handler found");
+//        HttpServletRequestImpl httpServletRequest = new HttpServletRequestImpl(request);
+//        // Проверка, что у нас запрос на выгрузку файла (file upload request):
+//        boolean isMultipart = ServletFileUpload.isMultipartContent(httpServletRequest);
+//        System.out.println("is multi: " + isMultipart);
+//
+//        // Создание фактории для элементов файла, сохраняемых на диск:
+//        DiskFileItemFactory factory = new DiskFileItemFactory();
+//        FileUpload fileUpload = new FileUpload(factory);
+//        fileUpload.parseRequest(httpServletRequest);
+//        System.out.println("multi found");
+//
+//        // Конфигурирование репозитория (чтобы обеспечить безопасность использования временного
+//        // размещения):
+//        File repository = new File(request.getPath());
+//        System.out.println("is file: " + repository);
+//        factory.setRepository(repository);
+//
+//
+//// Создание нового обработчика выгрузки файла:
+//        ServletFileUpload upload = new ServletFileUpload(factory);
+//
+//// Парсинг запроса:
+//        List<FileItem> items = upload.parseRequest(httpServletRequest);
+//        for (FileItem fl : items) {
+//            System.out.println(fl.getFieldName());
+//        }
+//    }
+
     private void connection(Socket socket) {
         final var allowedMethods = List.of(GET, POST);
         try (
@@ -57,11 +119,9 @@ public class Server {
                 final var out = new BufferedOutputStream(socket.getOutputStream())
         ) {
             Request request = new Request();
-            // лимит на request line + заголовки
-            final var limit = 4096;
 
-            in.mark(limit);
-            final var buffer = new byte[limit];
+            in.mark(LIMIT);
+            final var buffer = new byte[LIMIT];
             final var read = in.read(buffer);
 
             // ищем request line
@@ -127,6 +187,7 @@ public class Server {
             // пропускаем requestLine
             in.skip(headersStart);
 
+
             final var headersBytes = in.readNBytes(headersEnd - headersStart);
             request.setHeaders(Arrays.asList(new String(headersBytes).split("\r\n")));
             System.out.println("headers: " + request.getHeaders());
@@ -136,18 +197,22 @@ public class Server {
                 in.skip(headersDelimiter.length);
                 // вычитываем Content-Length, чтобы прочитать body
                 final var contentLength = extractHeader(request.getHeaders(), "Content-Length");
+                final var contentType = extractHeader(request.getHeaders(), "Content-Type");
                 if (contentLength.isPresent()) {
                     final var length = Integer.parseInt(contentLength.get());
                     final var bodyBytes = in.readNBytes(length);
                     request.setBody(new String(bodyBytes));
                     System.out.println("body: " + request.getBody());
+                    for (final var s : getPostParams(request)) {
+                        System.out.println("param: " + s.getValue());
+                    }
                 }
             }
 
-            if (searchHandler(request.getMethod(), request.getPath())){
+            if (searchHandler(request.getMethod(), request.getPath())) {
                 System.out.println("handler found");
-                getHandler(request.getMethod(), request.getPath()).handle(request,out);
-            }else {
+                getHandler(request.getMethod(), request.getPath()).handle(request, out);
+            } else {
                 out.write((
                         "HTTP/1.1 200 OK\r\n" +
                                 "Content-Length: 0\r\n" +
@@ -187,6 +252,21 @@ public class Server {
 
     private Handler getHandler(String method, String path) {
         return handlers.get(method).get(path);
+    }
+
+    public void getFile(BufferedOutputStream out, Request request) throws IOException {
+        final var filePath = request.getFilePath();
+        final var mimeType = Files.probeContentType(filePath);
+        final var length = Files.size(filePath);
+        out.write((
+                "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: " + mimeType + "\r\n" +
+                        "Content-Length: " + length + "\r\n" +
+                        "Connection: close\r\n" +
+                        "\r\n"
+        ).getBytes());
+        Files.copy(filePath, out);
+        out.flush();
     }
 
     private void badRequest(BufferedOutputStream out) throws IOException {
@@ -278,5 +358,6 @@ public class Server {
     public void start() {
         this.start(DEFAULT_PORT);
     }
+
 
 }

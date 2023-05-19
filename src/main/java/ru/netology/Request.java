@@ -1,10 +1,6 @@
 package ru.netology;
 
-import org.apache.hc.core5.http.NameValuePair;
-import org.apache.hc.core5.net.URLEncodedUtils;
-
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
+import java.nio.file.Path;
 import java.util.List;
 
 public class Request {
@@ -29,6 +25,10 @@ public class Request {
 
     public String getPath() {
         return path;
+    }
+
+    public Path getFilePath() {
+        return Path.of(".", path);
     }
 
     public void setPath(String path) {
@@ -59,17 +59,9 @@ public class Request {
         this.query = query;
     }
 
-    public List<NameValuePair> getQueryParams() {
-        return  URLEncodedUtils.parse(query, StandardCharsets.UTF_8);
-    }
 
-    public List<String> getQueryParam(String name){
-        final var params =  getQueryParams();
-        List<String> paramValue = new ArrayList<>();
-        for (final var param : params){
-            if (param.getName().equals(name)) paramValue.add(param.getValue());
-        }
-        return paramValue;
-    }
+
+
+
 
 }
