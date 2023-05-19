@@ -91,16 +91,23 @@ public class Server {
                 badRequest(out);
                 return;
             }
+
+            //возвращаем иконку
             if (requestLine[1].equals("/favicon.ico")) {
                 getFavicon(out);
                 return;
             }
 
             if (request.getMethod().equals(GET)) {
-                request.setQuery(requestLine[1].substring(requestLine[1].indexOf('?') + 1));
-                request.setPath(requestLine[1].substring(0, requestLine[1].indexOf('?')));
-                System.out.println("path: " + request.getPath());
-                System.out.println("query: " + request.getQuery());
+                if (requestLine[1].contains("?")) {
+                    request.setQuery(requestLine[1].substring(requestLine[1].indexOf('?') + 1));
+                    request.setPath(requestLine[1].substring(0, requestLine[1].indexOf('?')));
+                    System.out.println("path: " + request.getPath());
+                    System.out.println("query: " + request.getQuery());
+                } else {
+                    request.setPath(requestLine[1]);
+                    System.out.println("path: " + request.getPath());
+                }
             } else {
                 request.setPath(requestLine[1]);
                 System.out.println("path: " + request.getPath());
@@ -138,7 +145,8 @@ public class Server {
             }
 
             if (searchHandler(request.getMethod(), request.getPath())){
-                getHandler(request.getMethod(), request.getPath());
+                System.out.println("handler found");
+                getHandler(request.getMethod(), request.getPath()).handle(request,out);
             }else {
                 out.write((
                         "HTTP/1.1 200 OK\r\n" +
@@ -225,6 +233,7 @@ public class Server {
 
     private void getFavicon(BufferedOutputStream out) throws IOException {
         final var filePath = Path.of(".", "src/main/resources/favicon.ico");
+        System.out.println(filePath);
         final var mimeType = Files.probeContentType(filePath);
         final var length = Files.size(filePath);
         requestOk(out, mimeType, length);
